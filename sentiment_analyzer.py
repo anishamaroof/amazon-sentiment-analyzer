@@ -9,23 +9,33 @@ from sklearn.pipeline import Pipeline
 from sklearn.metrics import accuracy_score
 
 # =========================
-# APP UI
+# UI
 # =========================
 st.set_page_config(page_title="Sentiment Analyzer", page_icon="🛍️")
-st.title("🛍️ Amazon Sentiment Analyzer")
-st.write("Enter a review and predict sentiment (Positive / Negative / Neutral)")
+st.title("🛍️ Amazon Review Sentiment Analyzer")
+st.write("Enter a review and get sentiment prediction")
 
 # =========================
-# DATASET
+# DATASET (IMPROVED)
 # =========================
 positive = [
-    "This product is amazing", "Best purchase ever", "Very good quality", "I love it"
+    "This product is amazing", "I love this item", "Best purchase ever",
+    "Excellent quality", "Very happy with this", "Highly recommended",
+    "Works perfectly", "Great value for money", "Superb experience",
+    "Fantastic product"
 ]
+
 negative = [
-    "Worst product ever", "Very bad quality", "Totally useless", "I hate it"
+    "Worst product ever", "I hate it", "Very bad quality",
+    "Completely useless", "Broke after one day", "Waste of money",
+    "Terrible experience", "Do not buy this", "Very disappointed",
+    "Poor quality product"
 ]
+
 neutral = [
-    "It is okay", "Average product", "Not bad not good", "Fine product"
+    "It is okay", "Average product", "Not bad not good",
+    "It works fine", "Normal item", "Nothing special",
+    "Decent enough", "It's fine", "Basic product", "Alright item"
 ]
 
 data = (
@@ -47,28 +57,31 @@ def clean_text(text):
 df["clean"] = df["review"].apply(clean_text)
 
 # =========================
-# TRAIN MODEL
+# TRAIN TEST SPLIT
 # =========================
 X_train, X_test, y_train, y_test = train_test_split(
     df["clean"],
     df["sentiment"],
-    test_size=0.2,
+    test_size=0.25,
     random_state=42,
     stratify=df["sentiment"]
 )
 
+# =========================
+# MODEL (IMPROVED)
+# =========================
 model = Pipeline([
-    ("tfidf", TfidfVectorizer()),
-    ("clf", LogisticRegression(max_iter=1000))
+    ("tfidf", TfidfVectorizer(ngram_range=(1,2))),
+    ("clf", LogisticRegression(max_iter=2000, class_weight="balanced"))
 ])
 
 model.fit(X_train, y_train)
 
 # accuracy
-accuracy = accuracy_score(y_test, model.predict(X_test))
+acc = accuracy_score(y_test, model.predict(X_test))
 
 st.sidebar.write("📊 Model Accuracy")
-st.sidebar.write(f"{accuracy*100:.2f}%")
+st.sidebar.write(f"{acc*100:.2f}%")
 
 # =========================
 # INPUT
@@ -80,14 +93,12 @@ if st.button("Predict"):
         st.warning("Please enter text")
     else:
         cleaned = clean_text(user_input)
-        prediction = model.predict([cleaned])[0]
+        pred = model.predict([cleaned])[0]
 
-        st.success(f"Prediction: {prediction}")
+        emoji = {
+            "Positive": "😊",
+            "Negative": "😡",
+            "Neutral": "😐"
+        }
 
-# =========================
-# SAMPLE
-# =========================
-st.write("### Example Reviews")
-st.write("- This product is really good")
-st.write("- Worst experience ever")
-st.write("- It is fine")
+        st.success(f"Prediction: {emoji[pred]} {pred}")
