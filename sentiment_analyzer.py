@@ -16,7 +16,6 @@ nltk.download('punkt')
 nltk.download('averaged_perceptron_tagger')
 
 from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 
 from sklearn.model_selection import train_test_split
@@ -107,7 +106,7 @@ def clean_text(text):
     text = re.sub(r"\s+", " ", text).strip()
 
     # Tokenization
-    tokens = word_tokenize(text)
+    tokens = text.split()
 
     # Stopword removal
     tokens = [t for t in tokens if t not in stop_words and len(t) > 2]
@@ -149,8 +148,7 @@ st.sidebar.write(f"Model Accuracy: **{accuracy*100:.2f}%**")
 st.sidebar.write("### Project Created By")
 st.sidebar.write("""
 - Anisha Maroof  
-- Kainat Arshad  
-- Javeria Akmal
+
 """)
 
 # ==============================
