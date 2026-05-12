@@ -1,52 +1,49 @@
-"""
-============================================================
-  AMAZON REVIEW SENTIMENT ANALYZER
-  Text Mining Project — Undergraduate Level
-  Run: python sentiment_analyzer.py
-============================================================
-"""
+# ============================================================
+#   AMAZON REVIEW SENTIMENT ANALYZER
+#   Complete Text Mining Pipeline — Google Colab Ready
+#   Run: Runtime → Run All  (Ctrl+F9)
+# ============================================================
+
+# ─── CELL 1: Install & Import ───────────────────────────────
+!pip install -q nltk scikit-learn pandas numpy matplotlib seaborn wordcloud
 
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import seaborn as sns
+from wordcloud import WordCloud
+import re
+import nltk
+import warnings
+warnings.filterwarnings("ignore")
+
+nltk.download('stopwords',                  quiet=True)
+nltk.download('wordnet',                    quiet=True)
+nltk.download('punkt',                      quiet=True)
+nltk.download('punkt_tab',                  quiet=True)
+nltk.download('averaged_perceptron_tagger', quiet=True)
+
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from nltk.stem import PorterStemmer, WordNetLemmatizer
+from nltk import pos_tag
+
 from sklearn.model_selection import train_test_split
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.svm import LinearSVC
-from sklearn.metrics import (
-    classification_report, confusion_matrix,
-    accuracy_score, roc_auc_score, roc_curve
-)
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import LabelEncoder
-import nltk
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
-from nltk.stem import WordNetLemmatizer
-import re
-import warnings
-import os
+from collections import Counter
 
-warnings.filterwarnings("ignore")
+print("✅ All libraries loaded successfully!")
 
-# ─────────────────────────────────────────────
-#  STEP 0: Download NLTK resources
-# ─────────────────────────────────────────────
-print("\n📦 Downloading NLTK resources...")
-for resource in ["stopwords", "wordnet", "punkt", "punkt_tab", "averaged_perceptron_tagger"]:
-    nltk.download(resource, quiet=True)
-
-# ─────────────────────────────────────────────
-#  STEP 1: Generate Synthetic Amazon-Style Dataset
-# ─────────────────────────────────────────────
-print("📊 Generating Amazon-style review dataset...")
-
-np.random.seed(42)
-
-positive_reviews = [
+# ════════════════════════════════════════════════════════════
+#  CELL 2 — RAW DATASET
+# ════════════════════════════════════════════════════════════
+positive = [
     "This product is absolutely amazing, exceeded all my expectations!",
     "Best purchase I have ever made, highly recommend to everyone.",
     "Outstanding quality and fast shipping. Will definitely buy again.",
@@ -74,7 +71,7 @@ positive_reviews = [
     "This item is perfect for daily use. Strongly recommend it!",
 ]
 
-negative_reviews = [
+negative = [
     "Terrible product, broke after just two days of use. Very disappointed.",
     "Worst purchase ever. Completely useless and waste of money.",
     "Do not buy this! It stopped working after one week. Poor quality.",
@@ -102,7 +99,7 @@ negative_reviews = [
     "Completely useless product. Would not recommend to my worst enemy.",
 ]
 
-neutral_reviews = [
+neutral = [
     "Product is okay. Nothing special but it gets the job done.",
     "Average quality for the price. Expected better but not the worst.",
     "It works as described. Nothing more, nothing less. Decent purchase.",
@@ -120,256 +117,287 @@ neutral_reviews = [
     "Middle of the road product. Has its pros and cons.",
 ]
 
-# Build DataFrame
-all_reviews = (
-    [(r, "Positive") for r in positive_reviews] +
-    [(r, "Negative") for r in negative_reviews] +
-    [(r, "Neutral")  for r in neutral_reviews]
-)
+data = ([(r, "Positive") for r in positive] +
+        [(r, "Negative") for r in negative] +
+        [(r, "Neutral")  for r in neutral])
 
-# Augment with slight variations
-augmented = []
-for review, label in all_reviews:
-    augmented.append((review, label))
-    words = review.split()
-    if len(words) > 5:
-        shuffled = words[:2] + words[2:]
-        augmented.append((" ".join(shuffled), label))
-
-df = pd.DataFrame(augmented, columns=["review", "sentiment"])
+df = pd.DataFrame(data, columns=["review", "sentiment"])
 df = df.sample(frac=1, random_state=42).reset_index(drop=True)
 
-print(f"   ✅ Dataset created: {len(df)} reviews")
-print(f"   Distribution:\n{df['sentiment'].value_counts().to_string()}\n")
+print(f"✅ Dataset created: {len(df)} reviews")
+print(df["sentiment"].value_counts())
+print("\n📄 Sample reviews:")
+print(df[["review","sentiment"]].head(6).to_string(index=False))
 
-# ─────────────────────────────────────────────
-#  STEP 2: Text Preprocessing
-# ─────────────────────────────────────────────
-print("🧹 Preprocessing text...")
+# ════════════════════════════════════════════════════════════
+#  CELL 3 — TEXT MINING PIPELINE (Step by Step)
+# ════════════════════════════════════════════════════════════
+print("\n" + "="*60)
+print("   📌 TEXT MINING PIPELINE")
+print("="*60)
 
+stemmer    = PorterStemmer()
 lemmatizer = WordNetLemmatizer()
-stop_words  = set(stopwords.words("english"))
+stop_words = set(stopwords.words("english"))
 
-def preprocess(text):
-    text = text.lower()
-    text = re.sub(r"http\S+|www\S+", "", text)        # Remove URLs
-    text = re.sub(r"[^a-z\s]", "", text)              # Keep letters only
-    tokens = word_tokenize(text)
-    tokens = [lemmatizer.lemmatize(t) for t in tokens
-              if t not in stop_words and len(t) > 2]
-    return " ".join(tokens)
+# ── Step 1: Lowercasing ──────────────────────────────────────
+def step1_lowercase(text):
+    return text.lower()
 
-df["clean_review"] = df["review"].apply(preprocess)
-print("   ✅ Preprocessing done!\n")
+# ── Step 2: Noise Removal ────────────────────────────────────
+def step2_remove_noise(text):
+    text = re.sub(r"http\S+|www\S+", "", text)   # remove URLs
+    text = re.sub(r"[^a-z\s]",       "", text)   # remove punctuation/numbers
+    text = re.sub(r"\s+",            " ", text)  # remove extra spaces
+    return text.strip()
 
-# ─────────────────────────────────────────────
-#  STEP 3: Feature Engineering — TF-IDF
-# ─────────────────────────────────────────────
-X = df["clean_review"]
-y = df["sentiment"]
+# ── Step 3: Tokenization ─────────────────────────────────────
+def step3_tokenize(text):
+    return word_tokenize(text)
+
+# ── Step 4: Stopword Removal ─────────────────────────────────
+def step4_remove_stopwords(tokens):
+    return [t for t in tokens if t not in stop_words and len(t) > 2]
+
+# ── Step 5: POS Tagging ──────────────────────────────────────
+def step5_pos_tag(tokens):
+    return pos_tag(tokens)
+
+# ── Step 6: Stemming ─────────────────────────────────────────
+def step6_stem(tokens):
+    return [stemmer.stem(t) for t in tokens]
+
+# ── Step 7: Lemmatization ────────────────────────────────────
+def step7_lemmatize(tokens):
+    return [lemmatizer.lemmatize(t) for t in tokens]
+
+# ── Full Pipeline ────────────────────────────────────────────
+def full_pipeline(text, return_stages=False):
+    s1 = step1_lowercase(text)
+    s2 = step2_remove_noise(s1)
+    s3 = step3_tokenize(s2)
+    s4 = step4_remove_stopwords(s3)
+    s6 = step6_stem(s4)
+    s7 = step7_lemmatize(s4)
+
+    if return_stages:
+        return {
+            "1_lowercase":      s1,
+            "2_noise_removed":  s2,
+            "3_tokens":         s3,
+            "4_no_stopwords":   s4,
+            "5_pos_tags":       step5_pos_tag(s4),
+            "6_stemmed":        s6,
+            "7_lemmatized":     s7,
+            "final_clean":      " ".join(s7),
+        }
+    return " ".join(s7)
+
+# ── Show Pipeline on 1 example ───────────────────────────────
+example = df["review"].iloc[0]
+stages  = full_pipeline(example, return_stages=True)
+
+print(f"\n🔍 Example Review:\n   \"{example}\"\n")
+print("─── PIPELINE STAGES ───────────────────────────────────")
+for stage, result in stages.items():
+    if stage == "5_pos_tags":
+        print(f"  {stage:20s}: {result[:5]} ...")
+    elif isinstance(result, list):
+        print(f"  {stage:20s}: {result[:8]} ...")
+    else:
+        print(f"  {stage:20s}: {str(result)[:80]}")
+
+# ── Apply to whole dataset ───────────────────────────────────
+df["clean"] = df["review"].apply(full_pipeline)
+print("\n✅ Pipeline applied to all reviews!")
+print(df[["review","clean","sentiment"]].head(3).to_string(index=False))
+
+# ════════════════════════════════════════════════════════════
+#  CELL 4 — FEATURE EXTRACTION (BoW + TF-IDF)
+# ════════════════════════════════════════════════════════════
+print("\n" + "="*60)
+print("   📌 FEATURE EXTRACTION")
+print("="*60)
 
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
+    df["clean"], df["sentiment"],
+    test_size=0.2, random_state=42, stratify=df["sentiment"]
 )
 
-# ─────────────────────────────────────────────
-#  STEP 4: Train Multiple Models
-# ─────────────────────────────────────────────
-print("🤖 Training models...\n")
+# Bag of Words
+bow_vec = CountVectorizer(max_features=500)
+X_bow   = bow_vec.fit_transform(df["clean"])
+print(f"\n✅ Bag of Words matrix shape  : {X_bow.shape}")
+
+# TF-IDF
+tfidf_vec = TfidfVectorizer(ngram_range=(1,2), max_features=3000)
+X_tfidf   = tfidf_vec.fit_transform(df["clean"])
+print(f"✅ TF-IDF matrix shape        : {X_tfidf.shape}")
+
+# Top BoW terms
+top_bow = sorted(zip(bow_vec.get_feature_names_out(),
+                     np.asarray(X_bow.sum(axis=0)).flatten()),
+                 key=lambda x: -x[1])[:10]
+print("\n📊 Top 10 Bag-of-Words terms:")
+for word, freq in top_bow:
+    print(f"   {word:20s} → {int(freq)}")
+
+# ════════════════════════════════════════════════════════════
+#  CELL 5 — TRAIN 3 ML MODELS
+# ════════════════════════════════════════════════════════════
+print("\n" + "="*60)
+print("   📌 MODEL TRAINING")
+print("="*60)
 
 models = {
     "Logistic Regression": Pipeline([
-        ("tfidf", TfidfVectorizer(ngram_range=(1, 2), max_features=5000)),
-        ("clf",   LogisticRegression(max_iter=1000, random_state=42))
+        ("tfidf", TfidfVectorizer(ngram_range=(1,2), max_features=3000)),
+        ("clf",   LogisticRegression(max_iter=1000))
     ]),
     "Naive Bayes": Pipeline([
-        ("tfidf", TfidfVectorizer(ngram_range=(1, 2), max_features=5000)),
+        ("tfidf", TfidfVectorizer(ngram_range=(1,2), max_features=3000)),
         ("clf",   MultinomialNB())
     ]),
     "Linear SVM": Pipeline([
-        ("tfidf", TfidfVectorizer(ngram_range=(1, 2), max_features=5000)),
-        ("clf",   LinearSVC(random_state=42, max_iter=2000))
+        ("tfidf", TfidfVectorizer(ngram_range=(1,2), max_features=3000)),
+        ("clf",   LinearSVC(max_iter=2000))
     ]),
 }
 
 results = {}
-for name, pipeline in models.items():
-    pipeline.fit(X_train, y_train)
-    y_pred = pipeline.predict(X_test)
-    acc    = accuracy_score(y_test, y_pred)
-    results[name] = {"pipeline": pipeline, "y_pred": y_pred, "accuracy": acc}
-    print(f"   ✅ {name:25s} → Accuracy: {acc*100:.2f}%")
+print()
+for name, pipe in models.items():
+    pipe.fit(X_train, y_train)
+    y_pred_m = pipe.predict(X_test)
+    acc      = accuracy_score(y_test, y_pred_m)
+    results[name] = {"pipe": pipe, "acc": acc, "y_pred": y_pred_m}
+    print(f"  ✅ {name:25s} → Accuracy: {acc*100:.2f}%")
 
-best_name     = max(results, key=lambda k: results[k]["accuracy"])
-best_pipeline = results[best_name]["pipeline"]
-print(f"\n🏆 Best Model: {best_name} ({results[best_name]['accuracy']*100:.2f}%)\n")
+best      = max(results, key=lambda k: results[k]["acc"])
+best_pipe = results[best]["pipe"]
+y_pred    = results[best]["y_pred"]
+print(f"\n  🏆 Best Model: {best} ({results[best]['acc']*100:.2f}%)")
 
-# ─────────────────────────────────────────────
-#  STEP 5: Detailed Report for Best Model
-# ─────────────────────────────────────────────
-y_pred_best = results[best_name]["y_pred"]
-print("=" * 55)
-print(f"  Classification Report — {best_name}")
-print("=" * 55)
-print(classification_report(y_test, y_pred_best))
+# ════════════════════════════════════════════════════════════
+#  CELL 6 — CLASSIFICATION REPORT
+# ════════════════════════════════════════════════════════════
+print("\n" + "="*60)
+print(f"   📋 CLASSIFICATION REPORT — {best}")
+print("="*60)
+print(classification_report(y_test, y_pred))
 
-# ─────────────────────────────────────────────
-#  STEP 6: Visualizations
-# ─────────────────────────────────────────────
-print("📈 Generating visualizations...")
+# ════════════════════════════════════════════════════════════
+#  CELL 7 — VISUALIZATIONS (6 Charts)
+# ════════════════════════════════════════════════════════════
+COLORS = {"Positive":"#2ecc71", "Negative":"#e74c3c", "Neutral":"#3498db"}
 
-os.makedirs("plots", exist_ok=True)
-
-COLORS = {
-    "Positive": "#2ecc71",
-    "Negative": "#e74c3c",
-    "Neutral":  "#3498db",
-}
-PALETTE = ["#2ecc71", "#e74c3c", "#3498db"]
-
-plt.rcParams.update({
-    "font.family": "DejaVu Sans",
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-})
-
-# --- Plot 1: Sentiment Distribution ---
-fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-fig.suptitle("Sentiment Distribution", fontsize=16, fontweight="bold", y=1.02)
+# Chart 1 & 2: Distribution + Model Accuracy
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+fig.suptitle("Dataset Overview & Model Performance", fontsize=14, fontweight="bold")
 
 counts = df["sentiment"].value_counts()
-bars   = axes[0].bar(counts.index, counts.values,
-                     color=[COLORS[s] for s in counts.index],
-                     edgecolor="white", linewidth=1.5, width=0.55)
-for bar, val in zip(bars, counts.values):
-    axes[0].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
-                 str(val), ha="center", va="bottom", fontweight="bold")
-axes[0].set_title("Review Count by Sentiment")
-axes[0].set_xlabel("Sentiment")
-axes[0].set_ylabel("Count")
+axes[0].bar(counts.index, counts.values,
+            color=[COLORS[s] for s in counts.index],
+            edgecolor="white", width=0.5)
+for bar, val in zip(axes[0].patches, counts.values):
+    axes[0].text(bar.get_x()+bar.get_width()/2,
+                 bar.get_height()+0.3, str(val), ha="center", fontweight="bold")
+axes[0].set_title("Sentiment Distribution"); axes[0].set_ylabel("Count")
 
-axes[1].pie(counts.values, labels=counts.index,
-            colors=[COLORS[s] for s in counts.index],
-            autopct="%1.1f%%", startangle=140,
-            wedgeprops={"edgecolor": "white", "linewidth": 2})
-axes[1].set_title("Sentiment Share (%)")
+names_ = list(results.keys())
+accs_  = [results[n]["acc"]*100 for n in names_]
+bc     = ["#e74c3c" if n==best else "#bdc3c7" for n in names_]
+axes[1].bar(names_, accs_, color=bc, edgecolor="white", width=0.5)
+axes[1].set_ylim(0, 115)
+axes[1].set_title("Model Accuracy Comparison"); axes[1].set_ylabel("Accuracy (%)")
+for i,(n,a) in enumerate(zip(names_,accs_)):
+    axes[1].text(i, a+1, f"{a:.1f}%", ha="center", fontweight="bold")
+axes[1].legend(handles=[mpatches.Patch(color="#e74c3c", label=f"Best: {best}")])
+plt.tight_layout(); plt.show()
 
-plt.tight_layout()
-plt.savefig("plots/01_sentiment_distribution.png", dpi=150, bbox_inches="tight")
-plt.close()
-
-# --- Plot 2: Model Accuracy Comparison ---
-fig, ax = plt.subplots(figsize=(9, 5))
-names  = list(results.keys())
-accs   = [results[n]["accuracy"] * 100 for n in names]
-bar_colors = ["#e74c3c" if n == best_name else "#95a5a6" for n in names]
-
-bars = ax.bar(names, accs, color=bar_colors, edgecolor="white",
-              linewidth=1.5, width=0.5)
-for bar, acc in zip(bars, accs):
-    ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.3,
-            f"{acc:.2f}%", ha="center", va="bottom", fontweight="bold")
-ax.set_ylim(0, 115)
-ax.set_title("Model Accuracy Comparison", fontsize=14, fontweight="bold")
-ax.set_ylabel("Accuracy (%)")
-ax.set_xlabel("Model")
-best_patch = mpatches.Patch(color="#e74c3c", label=f"Best: {best_name}")
-ax.legend(handles=[best_patch], loc="upper right")
-plt.tight_layout()
-plt.savefig("plots/02_model_comparison.png", dpi=150, bbox_inches="tight")
-plt.close()
-
-# --- Plot 3: Confusion Matrix ---
-labels = ["Negative", "Neutral", "Positive"]
-cm     = confusion_matrix(y_test, y_pred_best, labels=labels)
-
-fig, ax = plt.subplots(figsize=(7, 6))
+# Chart 3: Confusion Matrix
+labels_ = ["Negative","Neutral","Positive"]
+cm = confusion_matrix(y_test, y_pred, labels=labels_)
+fig, ax = plt.subplots(figsize=(7,6))
 sns.heatmap(cm, annot=True, fmt="d", cmap="YlOrRd",
-            xticklabels=labels, yticklabels=labels,
+            xticklabels=labels_, yticklabels=labels_,
             linewidths=0.5, linecolor="white", ax=ax)
-ax.set_title(f"Confusion Matrix — {best_name}", fontsize=13, fontweight="bold")
-ax.set_xlabel("Predicted Label")
-ax.set_ylabel("True Label")
-plt.tight_layout()
-plt.savefig("plots/03_confusion_matrix.png", dpi=150, bbox_inches="tight")
-plt.close()
+ax.set_title(f"Confusion Matrix — {best}", fontsize=13, fontweight="bold")
+ax.set_xlabel("Predicted"); ax.set_ylabel("Actual")
+plt.tight_layout(); plt.show()
 
-# --- Plot 4: Review Length Distribution ---
-df["review_length"] = df["review"].apply(lambda x: len(x.split()))
+# Chart 4: Word Clouds
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+fig.suptitle("Word Clouds by Sentiment", fontsize=14, fontweight="bold")
+wc_colors = {"Positive":"Greens", "Negative":"Reds", "Neutral":"Blues"}
+for ax, sentiment in zip(axes, ["Positive","Negative","Neutral"]):
+    text = " ".join(df[df["sentiment"]==sentiment]["clean"])
+    wc   = WordCloud(width=500, height=300, background_color="white",
+                     colormap=wc_colors[sentiment], max_words=60).generate(text)
+    ax.imshow(wc, interpolation="bilinear")
+    ax.axis("off")
+    ax.set_title(sentiment, fontsize=13, fontweight="bold", color=COLORS[sentiment])
+plt.tight_layout(); plt.show()
 
-fig, ax = plt.subplots(figsize=(10, 5))
-for sentiment, color in COLORS.items():
-    subset = df[df["sentiment"] == sentiment]["review_length"]
-    ax.hist(subset, bins=20, alpha=0.6, label=sentiment,
-            color=color, edgecolor="white")
-ax.set_title("Review Word-Length Distribution by Sentiment",
-             fontsize=13, fontweight="bold")
-ax.set_xlabel("Word Count")
-ax.set_ylabel("Frequency")
-ax.legend()
-plt.tight_layout()
-plt.savefig("plots/04_length_distribution.png", dpi=150, bbox_inches="tight")
-plt.close()
+# Chart 5: Top Words per Sentiment
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+fig.suptitle("Top 10 Most Frequent Words per Sentiment", fontsize=14, fontweight="bold")
+for ax, sentiment in zip(axes, ["Positive","Negative","Neutral"]):
+    words  = " ".join(df[df["sentiment"]==sentiment]["clean"]).split()
+    common = Counter(words).most_common(10)
+    w, c   = zip(*common)
+    ax.barh(w[::-1], c[::-1], color=COLORS[sentiment], edgecolor="white")
+    ax.set_title(sentiment, fontweight="bold", color=COLORS[sentiment])
+    ax.set_xlabel("Frequency")
+plt.tight_layout(); plt.show()
 
-# --- Plot 5: Top TF-IDF Features ---
-tfidf_vect  = best_pipeline.named_steps["tfidf"]
-clf         = best_pipeline.named_steps["clf"]
-feature_names = np.array(tfidf_vect.get_feature_names_out())
+# Chart 6: Pipeline Token Reduction
+df["raw_len"]   = df["review"].apply(lambda x: len(x.split()))
+df["clean_len"] = df["clean"].apply(lambda x: len(x.split()))
+fig, ax = plt.subplots(figsize=(12, 5))
+x = np.arange(len(df))
+ax.plot(x, df["raw_len"],   alpha=0.5, label="Before Pipeline", color="#95a5a6")
+ax.plot(x, df["clean_len"], alpha=0.8, label="After Pipeline",  color="#e74c3c")
+ax.fill_between(x, df["clean_len"], df["raw_len"], alpha=0.1, color="#e74c3c")
+ax.set_title("Text Mining Pipeline — Token Reduction Effect", fontsize=13, fontweight="bold")
+ax.set_xlabel("Review Index"); ax.set_ylabel("Word Count")
+ax.legend(); plt.tight_layout(); plt.show()
 
-if hasattr(clf, "coef_"):
-    classes = clf.classes_
-    fig, axes = plt.subplots(1, len(classes), figsize=(15, 5))
-    fig.suptitle(f"Top Predictive Words — {best_name}",
-                 fontsize=14, fontweight="bold")
-    for i, (cls, ax) in enumerate(zip(classes, axes)):
-        top_idx  = np.argsort(clf.coef_[i])[-15:]
-        top_feat = feature_names[top_idx]
-        top_coef = clf.coef_[i][top_idx]
-        ax.barh(top_feat, top_coef, color=COLORS.get(cls, "#7f8c8d"),
-                edgecolor="white")
-        ax.set_title(cls, fontweight="bold", color=COLORS.get(cls, "#7f8c8d"))
-        ax.set_xlabel("TF-IDF Coefficient")
-    plt.tight_layout()
-    plt.savefig("plots/05_top_features.png", dpi=150, bbox_inches="tight")
-    plt.close()
+print("✅ All 6 visualizations done!")
 
-print("   ✅ All plots saved to  ./plots/\n")
+# ════════════════════════════════════════════════════════════
+#  CELL 8 — LIVE DEMO PREDICTIONS
+# ════════════════════════════════════════════════════════════
+emoji = {"Positive":"😊", "Negative":"😡", "Neutral":"😐"}
 
-# ─────────────────────────────────────────────
-#  STEP 7: Live Prediction Demo
-# ─────────────────────────────────────────────
-print("=" * 55)
-print("  🎯  LIVE PREDICTION DEMO")
-print("=" * 55)
-
-demo_reviews = [
+demo = [
     "This product is absolutely wonderful, I love it!",
-    "Terrible quality, broke after one day. Total waste.",
-    "It's okay, nothing special but works fine.",
-    "Best thing I ever bought. Highly recommended!",
-    "Very disappointing. Does not work as advertised.",
+    "Terrible quality, broke after one day. Total waste of money.",
+    "It is okay, nothing special but gets the job done.",
+    "Best thing I ever bought. Highly recommended to everyone!",
+    "Very disappointing. Does not work as advertised at all.",
 ]
 
-emoji_map = {"Positive": "😊", "Negative": "😡", "Neutral": "😐"}
+print("\n" + "="*60)
+print("   🎯 LIVE PREDICTIONS — Best Model:", best)
+print("="*60)
+for review in demo:
+    cleaned = full_pipeline(review)
+    pred    = best_pipe.predict([cleaned])[0]
+    print(f"\n  Review   : {review}")
+    print(f"  Cleaned  : {cleaned}")
+    print(f"  Sentiment: {emoji[pred]} {pred}")
 
-for review in demo_reviews:
-    prediction = best_pipeline.predict([review])[0]
-    print(f"  Review   : {review[:60]}...")
-    print(f"  Predicted: {emoji_map[prediction]} {prediction}\n")
-
-# ─────────────────────────────────────────────
-#  STEP 8: Interactive Prediction
-# ─────────────────────────────────────────────
-print("=" * 55)
-print("  ✍️  TYPE YOUR OWN REVIEW  (type 'quit' to exit)")
-print("=" * 55)
-
-while True:
-    user_input = input("\n  Enter a review: ").strip()
-    if user_input.lower() in ("quit", "exit", "q"):
-        print("\n  👋 Exiting. Thanks for using the Sentiment Analyzer!\n")
-        break
-    if not user_input:
-        continue
-    pred = best_pipeline.predict([user_input])[0]
-    print(f"  🔍 Sentiment: {emoji_map[pred]} {pred}")
+print("\n" + "="*60)
+print("  ✅ PROJECT COMPLETE — PIPELINE SUMMARY")
+print("="*60)
+print("  Step 1: Lowercasing       → normalize text case")
+print("  Step 2: Noise Removal     → strip URLs & punctuation")
+print("  Step 3: Tokenization      → split into word tokens")
+print("  Step 4: Stopword Removal  → remove common words")
+print("  Step 5: POS Tagging       → identify word types")
+print("  Step 6: Stemming          → reduce to root form")
+print("  Step 7: Lemmatization     → proper dictionary form")
+print("  Step 8: Feature Extraction→ Bag of Words + TF-IDF")
+print("  Step 9: ML Classification → LR, Naive Bayes, SVM")
+print("="*60)
