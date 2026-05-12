@@ -1,11 +1,5 @@
-# ============================================================
-#   AMAZON REVIEW SENTIMENT ANALYZER
-#   Complete Text Mining Pipeline — Google Colab Ready
-#   Run: Runtime → Run All  (Ctrl+F9)
-# ============================================================
 
-# ─── CELL 1: Install & Import ───────────────────────────────
-!pip install -q nltk scikit-learn pandas numpy matplotlib seaborn wordcloud
+#   AMAZON REVIEW SENTIMENT Analyzer 
 
 import pandas as pd
 import numpy as np
